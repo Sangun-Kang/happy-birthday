@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>おたんじょうび おめでとう！</title>
+<style>
+  :root { --ink:#111; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  body {
+    display: grid; place-items: center;
+    font-family: Impact, "MS PGothic", "ヒラギノ角ゴ ProN", "Hiragino Sans", sans-serif;
+    color: var(--ink);
+    background: #0d0d0d;
+  }
+
+  .card {
+    position: relative; z-index: 2;
+    background: #fff; border: 4px solid var(--ink);
+    padding: 40px 32px; margin: 16px; max-width: min(520px, 92vw);
+    text-align: center;
+  }
+  h1 { margin: 0 0 28px; font-size: clamp(20px, 5vw, 30px); line-height: 1.5; }
+  .btns { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  button, input { font: inherit; border: 3px solid var(--ink); padding: 14px 28px; }
+  button { cursor: pointer; background: #ffe066; }
+  button.no { background: #dedede; }
+  button:hover { background: var(--ink); color: #fff; }
+  input { width: 100%; text-align: center; margin-bottom: 20px; background: #f6f6f6; }
+
+  /* --- おいわい画面 --- */
+  #party { position: fixed; inset: 0; display: none; }
+  /* 1枚目とメッセージは縦に積む。左右の2枚だけ隅に絶対配置 */
+  #party.on { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2vh; }
+  .meme { width: auto; }
+  #m1 { height: min(48vh, 72vw, 480px);
+        opacity: 0; scale: .88; transition: opacity 3s ease-in, scale 3s ease-out; }
+  #m1.show { opacity: 1; scale: 1; }
+  #m2, #m3 { position: absolute; bottom: 2%; height: min(46vh, 46vw, 380px); }
+  #m2 { left: 2%; }
+  #m3 { right: 2%; }
+  .pop { opacity: 0; }
+  .pop.show { animation: pop .5s cubic-bezier(.2,1.6,.4,1) forwards, wobble 2.2s ease-in-out .5s infinite; }
+  @keyframes pop {
+    0%   { opacity:0; transform: scale(.2) rotate(-25deg); }
+    60%  { opacity:1; transform: scale(1.25) rotate(8deg); }
+    100% { opacity:1; transform: scale(1) rotate(0); }
+  }
+  @keyframes wobble { 0%,100%{transform:rotate(-4deg) translateY(0)} 50%{transform:rotate(4deg) translateY(-10px)} }
+
+  #msg {
+    z-index: 3; text-align: center; padding: 0 16px;
+    opacity: 0; transform: translateY(60%) scale(3);
+  }
+  #msg.show { animation: slam .55s cubic-bezier(.2,1.5,.4,1) forwards; }
+  @keyframes slam { to { opacity:1; transform: translateY(0) scale(1); } }
+  /* text-stroke は太くすると字面を潰すので、昔ながらの影による縁取りにする */
+  #msg span { text-shadow: -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000; }
+  #who { display:block; font-size: min(7vw, 7vh, 60px); margin-bottom: 8px; color:#fff; }
+  #hb { display:block; font-size: min(9vw, 10vh, 84px); line-height: 1.15; color:#fff700;
+        animation: shake .35s infinite; }
+  @keyframes shake { 0%,100%{transform:rotate(-1.5deg)} 50%{transform:rotate(1.5deg)} }
+
+  @media (prefers-reduced-motion: reduce) {
+    body, #hb, .pop.show { animation-duration: .01ms; animation-iteration-count: 1; }
+    .pop.show { animation: none; opacity: 1; }
+  }
+</style>
+</head>
+<body>
+
+<div class="card" id="screen">
+  <h1 id="q">今日はあなたの誕生日ですか？</h1>
+  <div class="btns" id="ask">
+    <button id="yes">はい 🎂</button>
+    <button class="no" id="no">いいえ</button>
+  </div>
+  <form id="nameForm" hidden>
+    <input id="name" aria-label="なまえ" maxlength="20" placeholder="なまえ" autocomplete="name" required>
+    <button type="submit">おいわいしてもらう 🎉</button>
+  </form>
+</div>
+
+<div id="party" aria-live="polite">
+  <img class="meme" id="m1" src="assets/meme1.png" alt="パーティー帽子をかぶったミームマンとバースデーケーキ">
+  <img class="meme pop" id="m2" src="assets/meme2.png" alt="こっちを見ているぽっちゃり猫">
+  <img class="meme pop" id="m3" src="assets/meme3.png" alt="風船を持ってお祝いするカエル">
+  <div id="msg"><span id="who"></span><span id="hb">おたんじょうび<br>おめでとう！！！</span></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+<script>
+  const $ = id => document.getElementById(id);
+
+  // --- 音 (音源ファイルなしで鳴らす) ---
+  let ac;
+  const audio = () => (ac ||= new (window.AudioContext || window.webkitAudioContext)());
+  function tone(freq, at, dur, type, vol) {
+    const c = audio(), t = c.currentTime + at, o = c.createOscillator(), g = c.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + .02);
+    g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+    o.connect(g).connect(c.destination); o.start(t); o.stop(t + dur + .05);
+  }
+  function fanfare() {
+    [[523,0,.13],[523,.16,.13],[523,.32,.13],[659,.48,.2],[784,.7,.2],[1047,.92,1.1]]
+      .forEach(([f, at, d]) => { tone(f, at, d, 'sawtooth', .13); tone(f / 2, at, d, 'square', .05); });
+  }
+  function pop() { // クラッカーの「パンッ」
+    const c = audio(), n = c.sampleRate * .18, b = c.createBuffer(1, n, c.sampleRate), d = b.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n) ** 6;
+    const s = c.createBufferSource(); s.buffer = b;
+    const g = c.createGain(); g.gain.value = .4;
+    s.connect(g).connect(c.destination); s.start();
+  }
+
+  // --- 紙吹雪 ---
+  const boom = (x, y) => confetti({ particleCount: 130, spread: 100, startVelocity: 48, ticks: 220, origin: { x, y } });
+  function rain(ms) {
+    const end = Date.now() + ms;
+    (function frame() {
+      confetti({ particleCount: 4, angle: 60, spread: 75, origin: { x: 0, y: .95 } });
+      confetti({ particleCount: 4, angle: 120, spread: 75, origin: { x: 1, y: .95 } });
+      if (Date.now() < end) requestAnimationFrame(frame);
+    })();
+  }
+
+  $('yes').onclick = () => { $('q').textContent = 'お名前を教えてください'; $('ask').hidden = true; $('nameForm').hidden = false; $('name').focus(); };
+  $('no').onclick  = () => { $('q').textContent = '誕生日にまた来てね 👋'; $('ask').hidden = true; };
+
+  $('nameForm').onsubmit = e => {
+    e.preventDefault();
+    const name = $('name').value.trim();
+    if (!name) return;
+
+    $('screen').remove();
+    $('who').textContent = name + 'さん';
+    $('party').classList.add('on');
+
+    fanfare(); boom(.5, .5); rain(4000);
+    $('m1').classList.add('show');                                    // ゆっくり浮かび上がる
+    setTimeout(() => { $('m2').classList.add('show'); pop(); boom(.15, .8); },  700);
+    setTimeout(() => { $('m3').classList.add('show'); pop(); boom(.85, .8); }, 1300);
+    setTimeout(() => { $('msg').classList.add('show'); boom(.5, .7); },        1900);
+    setInterval(() => boom(Math.random(), Math.random() * .5 + .3), 2600);
+  };
+</script>
+</body>
+</html>
