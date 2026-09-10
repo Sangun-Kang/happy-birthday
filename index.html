@@ -8,8 +8,9 @@
   :root { --ink:#111; }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
-  html, body { height: 100%; margin: 0; overflow: hidden; }
+  html { height: 100%; }
   body {
+    min-height: 100%; margin: 0;
     display: grid; place-items: center;
     font-family: Impact, "MS PGothic", "ヒラギノ角ゴ ProN", "Hiragino Sans", sans-serif;
     color: var(--ink);
@@ -29,6 +30,17 @@
   button.no { background: #dedede; }
   button:hover { background: var(--ink); color: #fff; }
   input { width: 100%; text-align: center; margin-bottom: 20px; background: #f6f6f6; }
+
+  button.textlink {
+    background: none; border: none; margin-top: 22px; padding: 6px;
+    font-size: .8em; text-decoration: underline;
+  }
+  button.textlink:hover { background: none; color: #777; }
+
+  #linkBox { display: flex; gap: 8px; }
+  #link { margin: 0; min-width: 0; text-align: left; font-size: .75em; padding: 12px; }
+  #linkBox button { padding: 12px 16px; white-space: nowrap; }
+  #count { margin: 0; font-size: clamp(24px, 7vw, 44px); }
 
   /* --- おいわい画面 --- */
   #party { position: fixed; inset: 0; display: none; }
@@ -64,7 +76,7 @@
   @keyframes shake { 0%,100%{transform:rotate(-1.5deg)} 50%{transform:rotate(1.5deg)} }
 
   @media (prefers-reduced-motion: reduce) {
-    body, #hb, .pop.show { animation-duration: .01ms; animation-iteration-count: 1; }
+    #hb, .pop.show { animation-duration: .01ms; animation-iteration-count: 1; }
     .pop.show { animation: none; opacity: 1; }
   }
 </style>
@@ -73,14 +85,31 @@
 
 <div class="card" id="screen">
   <h1 id="q">今日はあなたの誕生日ですか？</h1>
+
   <div class="btns" id="ask">
     <button id="yes">はい 🎂</button>
     <button class="no" id="no">いいえ</button>
   </div>
+
   <form id="nameForm" hidden>
     <input id="name" aria-label="なまえ" maxlength="20" placeholder="なまえ" autocomplete="name" required>
     <button type="submit">おいわいしてもらう 🎉</button>
   </form>
+
+  <form id="giftForm" hidden>
+    <input id="toName" aria-label="お祝いする人の名前" maxlength="20" placeholder="お祝いする人の名前" required>
+    <input id="bday" type="date" aria-label="たんじょうび" required>
+    <button type="submit">リンクを作る 🔗</button>
+  </form>
+
+  <div id="linkBox" hidden>
+    <input id="link" aria-label="お祝いリンク" readonly>
+    <button id="copy">コピー</button>
+  </div>
+
+  <p id="count" hidden></p>
+
+  <button class="textlink" id="gift">誰かの誕生日をお祝いする →</button>
 </div>
 
 <div id="party" aria-live="polite">
@@ -97,6 +126,9 @@
   // --- 音 (音源ファイルなしで鳴らす) ---
   let ac;
   const audio = () => (ac ||= new (window.AudioContext || window.webkitAudioContext)());
+  // リンクから開いた直後は操作がないので AudioContext が suspended のまま。最初のタップで戻す
+  addEventListener('pointerdown', () => ac && ac.resume(), { once: true });
+
   function tone(freq, at, dur, type, vol) {
     const c = audio(), t = c.currentTime + at, o = c.createOscillator(), g = c.createGain();
     o.type = type; o.frequency.value = freq;
@@ -127,17 +159,19 @@
       if (Date.now() < end) requestAnimationFrame(frame);
     })();
   }
+  function fireworks(ms) { // お祝い画面の前に打ち上げるだけの花火
+    const end = Date.now() + ms;
+    (function f() {
+      boom(Math.random() * .8 + .1, Math.random() * .5 + .15); pop();
+      if (Date.now() < end) setTimeout(f, 380);
+    })();
+  }
 
-  $('yes').onclick = () => { $('q').textContent = 'お名前を教えてください'; $('ask').hidden = true; $('nameForm').hidden = false; $('name').focus(); };
-  $('no').onclick  = () => { $('q').textContent = '誕生日にまた来てね 👋'; $('ask').hidden = true; };
-
-  $('nameForm').onsubmit = e => {
-    e.preventDefault();
-    const name = $('name').value.trim();
-    if (!name) return;
-
-    $('screen').remove();
+  // --- お祝い本編 ---
+  function celebrate(name) {
+    const s = $('screen'); if (s) s.remove();
     $('who').textContent = name + 'さん';
+    document.title = name + 'さん おたんじょうび おめでとう！';
     $('party').classList.add('on');
 
     fanfare(); boom(.5, .5); rain(4000);
@@ -146,7 +180,77 @@
     setTimeout(() => { $('m3').classList.add('show'); pop(); boom(.85, .8); }, 1300);
     setTimeout(() => { $('msg').classList.add('show'); boom(.5, .7); },        1900);
     setInterval(() => boom(Math.random(), Math.random() * .5 + .3), 2600);
+  }
+
+  // --- 誕生日の判定 (年をまたぐので MM-DD だけで扱う) ---
+  const isToday = (m, d) => { const n = new Date(); return n.getMonth() + 1 === m && n.getDate() === d; };
+
+  function countdown(name, m, d) {
+    $('q').textContent = name + 'さんのたんじょうびまで';
+    $('ask').hidden = true;
+    $('count').hidden = false;
+    const tick = () => {
+      const now = new Date();
+      // ponytail: 2/29 生まれは閏年でない年に 3/1 へ丸まる。正確にやるなら閏年判定を足す
+      const t = new Date(now.getFullYear(), m - 1, d);
+      if (t < now) t.setFullYear(t.getFullYear() + 1);
+      const left = t - now;
+      if (left <= 0) { clearInterval(iv); celebrate(name); return; }   // 日付が変わったらそのままお祝いへ
+      const s = Math.floor(left / 1000), p = n => String(n).padStart(2, '0');
+      $('count').textContent =
+        Math.floor(s / 86400) + '日 ' + p(Math.floor(s % 86400 / 3600)) + ':' + p(Math.floor(s % 3600 / 60)) + ':' + p(s % 60);
+    };
+    tick();
+    const iv = setInterval(tick, 1000);
+  }
+
+  // --- 自分の誕生日を祝ってもらう ---
+  $('yes').onclick = () => { $('q').textContent = 'お名前を教えてください'; $('ask').hidden = true; $('nameForm').hidden = false; $('name').focus(); };
+  $('no').onclick  = () => { $('q').textContent = '誕生日にまた来てね 👋'; $('ask').hidden = true; };
+  $('nameForm').onsubmit = e => {
+    e.preventDefault();
+    const name = $('name').value.trim();
+    if (name) celebrate(name);
   };
+
+  // --- 誰かをお祝いするリンクを作る ---
+  $('gift').onclick = () => {
+    $('q').textContent = '誰の誕生日をお祝いする？';
+    $('ask').hidden = $('nameForm').hidden = $('gift').hidden = true;
+    $('giftForm').hidden = false;
+    $('toName').focus();
+  };
+  $('giftForm').onsubmit = e => {
+    e.preventDefault();
+    const name = $('toName').value.trim(), date = $('bday').value;   // date は YYYY-MM-DD
+    if (!name || !date) return;
+    $('link').value = location.origin + location.pathname + '?to=' + encodeURIComponent(name) + '&d=' + date.slice(5);
+    $('q').textContent = 'リンクができました！';
+    $('giftForm').hidden = true;
+    $('linkBox').hidden = $('gift').hidden = false;
+  };
+  $('copy').onclick = async () => {
+    try { await navigator.clipboard.writeText($('link').value); $('copy').textContent = 'コピーした！'; }
+    catch { $('link').select(); $('copy').textContent = '手動でコピー'; }
+    setTimeout(() => $('copy').textContent = 'コピー', 1800);
+  };
+
+  // --- リンクから開かれたとき ---
+  const q = new URLSearchParams(location.search);
+  const to = (q.get('to') || '').trim().slice(0, 20);
+  const dd = q.get('d') || '';
+  if (to && /^\d{2}-\d{2}$/.test(dd)) {
+    const [m, d] = dd.split('-').map(Number);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      if (isToday(m, d)) {
+        $('screen').remove();
+        fanfare(); fireworks(2400);
+        setTimeout(() => celebrate(to), 2500);   // 花火が続いたままお祝い画面へ
+      } else {
+        countdown(to, m, d);
+      }
+    }
+  }
 </script>
 </body>
 </html>
