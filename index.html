@@ -107,6 +107,8 @@
     <button id="copy">コピー</button>
   </div>
 
+  <button id="start" hidden>お祝いしてもらう 🎉</button>
+
   <p id="count" hidden></p>
 
   <button class="textlink" id="gift">誰かの誕生日をお祝いする →</button>
@@ -126,9 +128,6 @@
   // --- 音 (音源ファイルなしで鳴らす) ---
   let ac;
   const audio = () => (ac ||= new (window.AudioContext || window.webkitAudioContext)());
-  // リンクから開いた直後は操作がないので AudioContext が suspended のまま。最初のタップで戻す
-  addEventListener('pointerdown', () => ac && ac.resume(), { once: true });
-
   function tone(freq, at, dur, type, vol) {
     const c = audio(), t = c.currentTime + at, o = c.createOscillator(), g = c.createGain();
     o.type = type; o.frequency.value = freq;
@@ -243,9 +242,15 @@
     const [m, d] = dd.split('-').map(Number);
     if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
       if (isToday(m, d)) {
-        $('screen').remove();
-        fanfare(); fireworks(2400);
-        setTimeout(() => celebrate(to), 2500);   // 花火が続いたままお祝い画面へ
+        // 自動再生では音が鳴らない (AudioContext が suspended) ので、必ずタップを挟む
+        $('q').textContent = to + 'さんへ 🎁';
+        $('ask').hidden = $('gift').hidden = true;
+        $('start').hidden = false;
+        $('start').onclick = () => {
+          $('screen').remove();
+          fanfare(); fireworks(2400);
+          setTimeout(() => celebrate(to), 2500);   // 花火が続いたままお祝い画面へ
+        };
       } else {
         countdown(to, m, d);
       }
