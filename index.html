@@ -20,7 +20,7 @@
   .card {
     position: relative; z-index: 2;
     background: #fff; border: 4px solid var(--ink);
-    padding: 40px 32px; margin: 16px; max-width: min(520px, 92vw);
+    padding: 40px 32px; margin: 16px; width: min(520px, calc(100vw - 32px));
     text-align: center;
   }
   h1 { margin: 0 0 28px; font-size: clamp(20px, 5vw, 30px); line-height: 1.5; }
@@ -30,10 +30,12 @@
   button.no { background: #dedede; }
   button:hover { background: var(--ink); color: #fff; }
   input { width: 100%; text-align: center; margin-bottom: 20px; background: #f6f6f6; }
+  /* date 入力はカレンダーアイコン分の幅を内側に持つので、左右の余白を詰めないと枠から溢れる */
+  input[type="date"] { padding: 14px 10px; }
 
   button.textlink {
-    background: none; border: none; margin-top: 22px; padding: 6px;
-    font-size: .8em; text-decoration: underline;
+    display: block; margin: 22px auto 0; padding: 6px;
+    background: none; border: none; font-size: .8em; text-decoration: underline;
   }
   button.textlink:hover { background: none; color: #777; }
 
@@ -108,10 +110,10 @@
   </div>
 
   <button id="start" hidden>お祝いしてもらう 🎉</button>
-
   <p id="count" hidden></p>
 
   <button class="textlink" id="gift">誰かの誕生日をお祝いする →</button>
+  <button class="textlink" id="back" hidden>← もどる</button>
 </div>
 
 <div id="party" aria-live="polite">
@@ -166,6 +168,22 @@
     })();
   }
 
+  // --- カード内の画面遷移は 1 か所にまとめる ---
+  const VIEWS = ['ask', 'nameForm', 'giftForm', 'linkBox', 'start', 'count'];
+  const TITLES = {
+    ask:      '今日はあなたの誕生日ですか？',
+    bye:      '誕生日にまた来てね 👋',
+    nameForm: 'お名前を教えてください',
+    giftForm: '誰の誕生日をお祝いする？',
+    linkBox:  'リンクができました！',
+  };
+  function show(view) {
+    VIEWS.forEach(v => $(v).hidden = v !== view);
+    $('gift').hidden = !['ask', 'bye', 'count'].includes(view);
+    $('back').hidden = !['nameForm', 'giftForm', 'linkBox', 'bye'].includes(view);
+    if (TITLES[view]) $('q').textContent = TITLES[view];
+  }
+
   // --- お祝い本編 ---
   function celebrate(name) {
     const s = $('screen'); if (s) s.remove();
@@ -181,31 +199,24 @@
     setInterval(() => boom(Math.random(), Math.random() * .5 + .3), 2600);
   }
 
-  // --- 誕生日の判定 (年をまたぐので MM-DD だけで扱う) ---
-  const isToday = (m, d) => { const n = new Date(); return n.getMonth() + 1 === m && n.getDate() === d; };
-
-  function countdown(name, m, d) {
+  function countdown(name, target) {
     $('q').textContent = name + 'さんのたんじょうびまで';
-    $('ask').hidden = true;
-    $('count').hidden = false;
+    show('count');
+    let iv;
     const tick = () => {
-      const now = new Date();
-      // ponytail: 2/29 生まれは閏年でない年に 3/1 へ丸まる。正確にやるなら閏年判定を足す
-      const t = new Date(now.getFullYear(), m - 1, d);
-      if (t < now) t.setFullYear(t.getFullYear() + 1);
-      const left = t - now;
-      if (left <= 0) { clearInterval(iv); celebrate(name); return; }   // 日付が変わったらそのままお祝いへ
+      const left = target - Date.now();
+      if (left <= 0) { clearInterval(iv); celebrate(name); return; }  // 日付が変わったらそのままお祝いへ
       const s = Math.floor(left / 1000), p = n => String(n).padStart(2, '0');
       $('count').textContent =
         Math.floor(s / 86400) + '日 ' + p(Math.floor(s % 86400 / 3600)) + ':' + p(Math.floor(s % 3600 / 60)) + ':' + p(s % 60);
     };
     tick();
-    const iv = setInterval(tick, 1000);
+    iv = setInterval(tick, 1000);
   }
 
   // --- 自分の誕生日を祝ってもらう ---
-  $('yes').onclick = () => { $('q').textContent = 'お名前を教えてください'; $('ask').hidden = true; $('nameForm').hidden = false; $('name').focus(); };
-  $('no').onclick  = () => { $('q').textContent = '誕生日にまた来てね 👋'; $('ask').hidden = true; };
+  $('yes').onclick = () => { show('nameForm'); $('name').focus(); };
+  $('no').onclick  = () => show('bye');
   $('nameForm').onsubmit = e => {
     e.preventDefault();
     const name = $('name').value.trim();
@@ -213,20 +224,17 @@
   };
 
   // --- 誰かをお祝いするリンクを作る ---
-  $('gift').onclick = () => {
-    $('q').textContent = '誰の誕生日をお祝いする？';
-    $('ask').hidden = $('nameForm').hidden = $('gift').hidden = true;
-    $('giftForm').hidden = false;
-    $('toName').focus();
+  $('gift').onclick = () => { show('giftForm'); $('toName').focus(); };
+  $('back').onclick = () => {
+    $('name').value = $('toName').value = $('bday').value = '';
+    show('ask');
   };
   $('giftForm').onsubmit = e => {
     e.preventDefault();
     const name = $('toName').value.trim(), date = $('bday').value;   // date は YYYY-MM-DD
     if (!name || !date) return;
-    $('link').value = location.origin + location.pathname + '?to=' + encodeURIComponent(name) + '&d=' + date.slice(5);
-    $('q').textContent = 'リンクができました！';
-    $('giftForm').hidden = true;
-    $('linkBox').hidden = $('gift').hidden = false;
+    $('link').value = location.origin + location.pathname + '?to=' + encodeURIComponent(name) + '&d=' + date;
+    show('linkBox');
   };
   $('copy').onclick = async () => {
     try { await navigator.clipboard.writeText($('link').value); $('copy').textContent = 'コピーした！'; }
@@ -235,24 +243,26 @@
   };
 
   // --- リンクから開かれたとき ---
-  const q = new URLSearchParams(location.search);
-  const to = (q.get('to') || '').trim().slice(0, 20);
-  const dd = q.get('d') || '';
-  if (to && /^\d{2}-\d{2}$/.test(dd)) {
-    const [m, d] = dd.split('-').map(Number);
-    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
-      if (isToday(m, d)) {
-        // 自動再生では音が鳴らない (AudioContext が suspended) ので、必ずタップを挟む
+  const params = new URLSearchParams(location.search);
+  const to = (params.get('to') || '').trim().slice(0, 20);
+  const raw = params.get('d') || '';
+  if (to && /^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [y, m, d] = raw.split('-').map(Number);
+    const target = new Date(y, m - 1, d);
+    // 2月30日のような値は Date が繰り上げてしまうので、詰め直して同じ日付かを見る
+    if (target.getFullYear() === y && target.getMonth() === m - 1 && target.getDate() === d) {
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      if (target <= today) {          // 過ぎた誕生日もカウントダウンせずそのまま祝う
+        show('start');
         $('q').textContent = to + 'さんへ 🎁';
-        $('ask').hidden = $('gift').hidden = true;
-        $('start').hidden = false;
+        // 自動再生では音が鳴らない (AudioContext が suspended) ので、必ずタップを挟む
         $('start').onclick = () => {
           $('screen').remove();
           fanfare(); fireworks(2400);
           setTimeout(() => celebrate(to), 2500);   // 花火が続いたままお祝い画面へ
         };
       } else {
-        countdown(to, m, d);
+        countdown(to, target);
       }
     }
   }
